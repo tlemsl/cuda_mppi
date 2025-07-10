@@ -128,8 +128,8 @@ int main(int argc, char** argv) {
     cmd_vel_msg.drive.steering_angle = optimal_control[1];
     cmd_vel_pub.publish(cmd_vel_msg);
 
-    std::cout << "Optimal control: " << optimal_control[0] << ", "
-              << optimal_control[1] << std::endl;
+    // std::cout << "Optimal control: " << optimal_control[0] << ", "
+    //           << optimal_control[1] << std::endl;
     rate.sleep();
     ros::spinOnce();
   }

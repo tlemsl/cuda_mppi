@@ -6,7 +6,7 @@
 namespace mppi_controller {
 
 State ForwardDynamics(const State& current_state, const Control& control);
-
+float ComputeStateCost(const State& state, const Control& control, const State& target_state);
 }  // namespace mppi_controller
 
 #endif  // MPPI_FUNCTIONS_H

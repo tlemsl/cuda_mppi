@@ -8,6 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Set optimization flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall")
 
+enable_language(CUDA)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -O3 -Xcompiler -fPIC -arch=sm_86  ")
+
 # Find Eigen3
 find_package(Eigen3 REQUIRED)
 find_package(ackermann_msgs REQUIRED)
@@ -34,13 +37,33 @@ include_directories(
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${catkin_INCLUDE_DIRS})
 
-# Create executable
-add_library(c_mppi_controller_lib STATIC src/mppi_controller.cpp src/mppi_functions.cpp)
+find_package(CUDA REQUIRED)
+include_directories(${CUDA_INCLUDE_DIRS})
 
+set(CPP_SOURCES
+    src/mppi_controller.cpp
+    src/mppi_functions.cpp
+)
+
+set(CUDA_SOURCES
+    src/mppi_controller.cu
+    src/mppi_functions.cu
+)
+
+add_library(c_mppi_controller_lib STATIC ${CPP_SOURCES})
+add_library(cuda_mppi_controller_lib STATIC ${CUDA_SOURCES})
+target_compile_definitions(cuda_mppi_controller_lib PRIVATE USE_CUDA)
+set_property(TARGET cuda_mppi_controller_lib PROPERTY CUDA_STANDARD 14)
+set_property(TARGET cuda_mppi_controller_lib PROPERTY CUDA_STANDARD_REQUIRED ON)
+
+# Create executable
 add_executable(c_mppi_controller src/node.cpp)
+add_executable(cuda_mppi_controller src/node.cpp)
 
 # Link libraries
 target_link_libraries(c_mppi_controller ${catkin_LIBRARIES} c_mppi_controller_lib Eigen3::Eigen)
+target_link_libraries(cuda_mppi_controller ${catkin_LIBRARIES} cuda_mppi_controller_lib Eigen3::Eigen)
+target_link_libraries(cuda_mppi_controller ${CUDA_LIBRARIES} ${CUDA_CURAND_LIBRARY})
 
 # Print build information
 message(STATUS "CMAKE_CXX_COMPILER_ID: ${CMAKE_CXX_COMPILER_ID}")

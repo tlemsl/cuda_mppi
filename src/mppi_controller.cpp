@@ -9,17 +9,6 @@
 
 namespace mppi_controller {
 MPPIController::MPPIController() {
-#ifndef CUDAMODE
-  // Initialize cost matrices (similar to original implementation)
-  Q_ = Eigen::Matrix3d::Zero();
-  Q_(0, 0) = Q_X;      // x position cost
-  Q_(1, 1) = Q_Y;      // y position cost
-  Q_(2, 2) = Q_THETA;  // heading cost
-
-  R_ = Eigen::Matrix2d::Zero();
-  R_(0, 0) = R_VEL;    // velocity cost
-  R_(1, 1) = R_STEER;  // steering angle cost
-
   // Initialize containers
   control_sequences_.resize(NUM_SAMPLES);
   trajectories_.resize(NUM_SAMPLES);
@@ -32,12 +21,15 @@ MPPIController::MPPIController() {
 
   // Initialize random number generator
   generator_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
-  noise_dist_ = std::normal_distribution<double>(0.0, 0.5);
-#endif
-  std::cout << "Naive MPPI Controller (Ackermann) initialized with "
+  noise_dist_ = std::normal_distribution<float>(0.0, 0.5);
+  std::cout << "CPP MPPI Controller (Ackermann) initialized with "
             << NUM_SAMPLES << " samples, horizon " << HORIZON << ", wheelbase "
             << WHEELBASE << "m, max steering " << MAX_STEERING << " rad"
             << std::endl;
+}
+
+MPPIController::~MPPIController() {
+  // No special cleanup needed for CPU version
 }
 
 void MPPIController::SetCurrentState(const State& state) {
@@ -50,6 +42,8 @@ void MPPIController::SetTargetState(const State& target) {
 
 // Generate perturbed control sequences
 void MPPIController::GeneratePerturbedControls() {
+  auto start_time = std::chrono::high_resolution_clock::now();
+  
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     control_sequences_[i].resize(HORIZON);
 
@@ -57,56 +51,61 @@ void MPPIController::GeneratePerturbedControls() {
       Control perturbed_control;
 
       // Generate random perturbations
-      double vel_noise = noise_dist_(generator_) * MAX_VELOCITY;
-      double steering_noise = noise_dist_(generator_) * MAX_STEERING;
+      float vel_noise = noise_dist_(generator_) * MAX_VELOCITY;
+      float steering_noise = noise_dist_(generator_) * MAX_STEERING;
 
       // If we have a previous optimal sequence, add perturbations to it
       perturbed_control[0] = optimal_control_sequence_[t][0] + vel_noise;
       perturbed_control[1] = optimal_control_sequence_[t][1] + steering_noise;
       // Apply control limits
       perturbed_control[0] =
-          clamp(perturbed_control[0], -MAX_VELOCITY, MAX_VELOCITY);
+          clamp<float>(perturbed_control[0], -MAX_VELOCITY, MAX_VELOCITY);
       perturbed_control[1] =
-          clamp(perturbed_control[1], -MAX_STEERING, MAX_STEERING);
+          clamp<float>(perturbed_control[1], -MAX_STEERING, MAX_STEERING);
 
       control_sequences_[i][t] = perturbed_control;
     }
   }
+  
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+  std::cout << "[CPU] GeneratePerturbedControls execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
 // Generate trajectories by forward simulation
-void MPPIController::GenerateTrajectories() {
+void MPPIController::GenerateTrajectoriesWithCost() {
+  auto start_time = std::chrono::high_resolution_clock::now();
+  
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     trajectories_[i].clear();
     trajectories_[i].push_back(current_state_);
 
     State current = current_state_;
-    double total_cost = 0.0;
+    float total_cost = 0.0;
 
     // Forward simulate trajectory
     for (int t = 1; t < HORIZON; ++t) {
       // Compute cost
-      total_cost += ComputeStateCost(current, control_sequences_[i][t]);
+      total_cost += ComputeStateCost(current, control_sequences_[i][t], target_state_);
       current = ForwardDynamics(current, control_sequences_[i][t]);
       trajectories_[i].push_back(current);
     }
+    total_cost += ComputeStateCost(current, control_sequences_[i][HORIZON - 1], target_state_);
 
     trajectory_costs_[i] = total_cost;
   }
-}
-
-// Compute state cost (similar to original implementation)
-double MPPIController::ComputeStateCost(const State& state,
-                                        const Control& control) {
-  State error = state - target_state_;
-  double state_cost = error.transpose() * Q_ * error;
-  double control_cost = control.transpose() * R_ * control;
-  return state_cost + control_cost;
+  
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+  std::cout << "[CPU] GenerateTrajectoriesWithCost execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
 // Compute optimal control using importance-weighted averaging
 Control MPPIController::ComputeOptimalControl() {
+  auto total_start_time = std::chrono::high_resolution_clock::now();
+  
   // Warm start the optimal control sequence
+  auto warmstart_start = std::chrono::high_resolution_clock::now();
   if (optimal_control_sequence_.size() == HORIZON) {
     for (int t = 0; t < HORIZON - 1; ++t) {
       optimal_control_sequence_[t] = optimal_control_sequence_[t + 1];
@@ -119,27 +118,32 @@ Control MPPIController::ComputeOptimalControl() {
       optimal_control_sequence_[t] = Control::Zero();
     }
   }
+  auto warmstart_end = std::chrono::high_resolution_clock::now();
+  auto warmstart_duration = std::chrono::duration_cast<std::chrono::microseconds>(warmstart_end - warmstart_start);
+  std::cout << "[CPU] Warm start time: " << warmstart_duration.count() << " microseconds" << std::endl;
+  
   // Generate perturbed control sequences
   GeneratePerturbedControls();
 
   // Generate trajectories
-  GenerateTrajectories();
+  GenerateTrajectoriesWithCost();
 
   // Find minimum cost for normalization
-  double min_cost =
+  auto optimization_start = std::chrono::high_resolution_clock::now();
+  float min_cost =
       *std::min_element(trajectory_costs_.begin(), trajectory_costs_.end());
 
   // Compute importance-weighted control
   std::vector<Control> weighted_controls(HORIZON, Control::Zero());
-  double total_weights = 0.0;
+  float total_weights = 0.0;
 
   for (int i = 0; i < NUM_SAMPLES; ++i) {
-    std::cout << "Trajectory cost: " << trajectory_costs_[i] << std::endl;
-    std::cout << "Min cost: " << min_cost << std::endl;
-    std::cout << "Trajectory cost - min cost: " << trajectory_costs_[i] - min_cost
-              << std::endl;
-    double weight = std::exp(-(trajectory_costs_[i] - min_cost) / LAMBDA);
-    std::cout << "Weight: " << weight << std::endl;
+    // std::cout << "Trajectory cost: " << trajectory_costs_[i] << std::endl;
+    // std::cout << "Min cost: " << min_cost << std::endl;
+    // std::cout << "Trajectory cost - min cost: " << trajectory_costs_[i] - min_cost
+    //           << std::endl;
+    float weight = std::exp(-(trajectory_costs_[i] - min_cost) / LAMBDA);
+    // std::cout << "Weight: " << weight << std::endl;
 
     for (int t = 0; t < HORIZON; ++t) {
       weighted_controls[t] += control_sequences_[i][t] * weight;
@@ -158,6 +162,14 @@ Control MPPIController::ComputeOptimalControl() {
       optimal_control_sequence_[t] = Control::Zero();
     }
   }
+  
+  auto optimization_end = std::chrono::high_resolution_clock::now();
+  auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(optimization_end - optimization_start);
+  std::cout << "[CPU] Optimization time: " << optimization_duration.count() << " microseconds" << std::endl;
+
+  auto total_end_time = std::chrono::high_resolution_clock::now();
+  auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - total_start_time);
+  std::cout << "[CPU] TOTAL ComputeOptimalControl execution time: " << total_duration.count() << " microseconds" << std::endl;
 
   // Return first control action
   return optimal_control_sequence_[0];
