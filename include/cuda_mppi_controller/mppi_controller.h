@@ -4,6 +4,10 @@
 #include <Eigen/Dense>
 #include <random>
 #include <vector>
+#include <thread>
+#include <functional>
+#include <tbb/parallel_for.h>
+#include <tbb/blocked_range.h>
 
 #include "config.h"
 

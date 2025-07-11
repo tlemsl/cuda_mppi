@@ -41,9 +41,7 @@ void MPPIController::SetTargetState(const State& target) {
 }
 
 // Generate perturbed control sequences
-void MPPIController::GeneratePerturbedControls() {
-  auto start_time = std::chrono::high_resolution_clock::now();
-  
+void MPPIController::GeneratePerturbedControls() {  
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     control_sequences_[i].resize(HORIZON);
 
@@ -66,10 +64,6 @@ void MPPIController::GeneratePerturbedControls() {
       control_sequences_[i][t] = perturbed_control;
     }
   }
-  
-  auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-  std::cout << "[CPU] GeneratePerturbedControls execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
 // Generate trajectories by forward simulation
@@ -102,7 +96,7 @@ void MPPIController::GenerateTrajectoriesWithCost() {
 
 // Compute optimal control using importance-weighted averaging
 Control MPPIController::ComputeOptimalControl() {
-  auto total_start_time = std::chrono::high_resolution_clock::now();
+  auto start_time = std::chrono::high_resolution_clock::now();
   
   // Warm start the optimal control sequence
   auto warmstart_start = std::chrono::high_resolution_clock::now();
@@ -120,13 +114,18 @@ Control MPPIController::ComputeOptimalControl() {
   }
   auto warmstart_end = std::chrono::high_resolution_clock::now();
   auto warmstart_duration = std::chrono::duration_cast<std::chrono::microseconds>(warmstart_end - warmstart_start);
-  std::cout << "[CPU] Warm start time: " << warmstart_duration.count() << " microseconds" << std::endl;
   
   // Generate perturbed control sequences
+  auto perturbed_start = std::chrono::high_resolution_clock::now();
   GeneratePerturbedControls();
+  auto perturbed_end = std::chrono::high_resolution_clock::now();
+  auto perturbed_duration = std::chrono::duration_cast<std::chrono::microseconds>(perturbed_end - perturbed_start);
 
   // Generate trajectories
+  auto trajectories_start = std::chrono::high_resolution_clock::now();
   GenerateTrajectoriesWithCost();
+  auto trajectories_end = std::chrono::high_resolution_clock::now();
+  auto trajectories_duration = std::chrono::duration_cast<std::chrono::microseconds>(trajectories_end - trajectories_start);
 
   // Find minimum cost for normalization
   auto optimization_start = std::chrono::high_resolution_clock::now();
@@ -151,8 +150,8 @@ Control MPPIController::ComputeOptimalControl() {
     total_weights += weight;
 
   }
-  std::cout << "Min cost: " << min_cost << std::endl;
-  std::cout << "Total weights: " << total_weights << std::endl;
+  // std::cout << "Min cost: " << min_cost << std::endl;
+  // std::cout << "Total weights: " << total_weights << std::endl;
   // Normalize and update optimal control sequence
   for (int t = 0; t < HORIZON; ++t) {
     if (total_weights > 0) {
@@ -165,12 +164,16 @@ Control MPPIController::ComputeOptimalControl() {
   
   auto optimization_end = std::chrono::high_resolution_clock::now();
   auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(optimization_end - optimization_start);
-  std::cout << "[CPU] Optimization time: " << optimization_duration.count() << " microseconds" << std::endl;
 
   auto total_end_time = std::chrono::high_resolution_clock::now();
-  auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - total_start_time);
+  auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - start_time);
+  std::cout << "--------------------------------" << std::endl;
+  std::cout << "[CPU] Warm start time: " << warmstart_duration.count() << " microseconds" << std::endl;
+  std::cout << "[CPU] Perturbed controls generation time: " << perturbed_duration.count() << " microseconds" << std::endl;
+  std::cout << "[CPU] Trajectories generation time: " << trajectories_duration.count() << " microseconds" << std::endl;
+  std::cout << "[CPU] Optimization time: " << optimization_duration.count() << " microseconds" << std::endl;
   std::cout << "[CPU] TOTAL ComputeOptimalControl execution time: " << total_duration.count() << " microseconds" << std::endl;
-
+  std::cout << "--------------------------------" << std::endl;
   // Return first control action
   return optimal_control_sequence_[0];
 }

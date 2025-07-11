@@ -16,8 +16,8 @@ using Trajectory = std::vector<State>;
 
 
 // Controller parameters
-#define HORIZON 32
-#define NUM_SAMPLES 1024
+#define HORIZON 128
+#define NUM_SAMPLES 2048
 #define DT 0.05f
 #define LAMBDA 10.0f
 

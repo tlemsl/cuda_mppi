@@ -6,13 +6,14 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set optimization flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall")
 
 enable_language(CUDA)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -O3 -Xcompiler -fPIC -arch=sm_86  ")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -O2 -Xcompiler -fPIC -arch=sm_86  ")
 
 # Find Eigen3
 find_package(Eigen3 REQUIRED)
+find_package(TBB REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -61,8 +62,8 @@ add_executable(c_mppi_controller src/node.cpp)
 add_executable(cuda_mppi_controller src/node.cpp)
 
 # Link libraries
-target_link_libraries(c_mppi_controller ${catkin_LIBRARIES} c_mppi_controller_lib Eigen3::Eigen)
-target_link_libraries(cuda_mppi_controller ${catkin_LIBRARIES} cuda_mppi_controller_lib Eigen3::Eigen)
+target_link_libraries(c_mppi_controller ${catkin_LIBRARIES} c_mppi_controller_lib Eigen3::Eigen TBB::tbb)
+target_link_libraries(cuda_mppi_controller ${catkin_LIBRARIES} cuda_mppi_controller_lib Eigen3::Eigen TBB::tbb)
 target_link_libraries(cuda_mppi_controller ${CUDA_LIBRARIES} ${CUDA_CURAND_LIBRARY})
 
 # Print build information
