@@ -218,32 +218,38 @@ void MPPIController::GeneratePerturbedControls() {
   };
 
   // Use TBB parallel_for to parallelize the outer loop
-  PerturbedControlsFunctor functor(control_sequences_, optimal_control_sequence_, 
-                                   generator_, noise_dist_);
-  tbb::parallel_for(tbb::blocked_range<int>(0, NUM_SAMPLES), functor);
+  // PerturbedControlsFunctor functor(control_sequences_, optimal_control_sequence_, 
+  //                                  generator_, noise_dist_);
+  // tbb::parallel_for(tbb::blocked_range<int>(0, NUM_SAMPLES), functor);
 }
 // Generate trajectories by forward simulation
 void MPPIController::GenerateTrajectoriesWithCost() {
-  // auto host_start_time = std::chrono::high_resolution_clock::now();
+  auto host_start_time = std::chrono::high_resolution_clock::now();
   
   int total_thread = NUM_SAMPLES;
-  thread_size_ = dim3(128 * 2, 1);
+  thread_size_ = dim3(128, 1);
   int total_block = (total_thread + thread_size_.x - 1) / thread_size_.x;
   block_size_ = dim3(total_block, 1);
 
   // Time CUDA kernel execution
-  cudaEventRecord(start_event_);
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  
+  cudaEventRecord(start);
   kernel_GenerateTrajectoriesWithCost<<<block_size_, thread_size_>>>(
       trajectories_d_, trajectory_costs_d_, current_state_d_, control_sequences_d_, target_state_d_);
-  cudaDeviceSynchronize();
-  cudaEventRecord(end_event_);
-
-  float kernel_time;
-  cudaEventElapsedTime(&kernel_time, start_event_, end_event_);
-  // std::cout << "[CUDA] GenerateTrajectoriesWithCost kernel time: " << kernel_time * 1000 << " microseconds" << std::endl;
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
   
+  float kernel_time_ms;
+  cudaEventElapsedTime(&kernel_time_ms, start, stop);
+  std::cout << "[CUDA] GenerateTrajectoriesWithCost kernel time: " << kernel_time_ms * 1000.0f << " microseconds" << std::endl;
+  
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
   // Copy back trajectory costs
-  // auto memory_copy_start = std::chrono::high_resolution_clock::now();
+  auto memory_copy_start = std::chrono::high_resolution_clock::now();
   cudaMemcpyAsync(trajectory_costs_.data(), trajectory_costs_d_,
              sizeof(float) * NUM_SAMPLES, cudaMemcpyDeviceToHost);
              
@@ -253,9 +259,9 @@ void MPPIController::GenerateTrajectoriesWithCost() {
              sizeof(CudaTrajectory) * NUM_SAMPLES, cudaMemcpyDeviceToHost);
              
   // Convert CUDA trajectories to host format
-  for (int i = 0; i < NUM_SAMPLES; ++i) {
-    trajectories_[i] = ToTrajectory(cuda_trajectories[i]);
-  }
+  // for (int i = 0; i < NUM_SAMPLES; ++i) {
+  //   trajectories_[i] = ToTrajectory(cuda_trajectories[i]);
+  // }
   // auto memory_copy_end = std::chrono::high_resolution_clock::now();
   // auto memory_copy_duration = std::chrono::duration_cast<std::chrono::microseconds>(memory_copy_end - memory_copy_start);
   // std::cout << "[CUDA] Memory copy back time: " << memory_copy_duration.count() << " microseconds" << std::endl;
