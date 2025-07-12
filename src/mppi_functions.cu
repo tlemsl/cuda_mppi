@@ -76,26 +76,24 @@ __device__ inline void ComputeStateCost(const CudaState& state,
   *cost += R_STEER * steering * steering;
 }
 
-__global__ void kernel_GeneratePerturbedControls(
+__global__ void kernel_GeneratePerturbedControlsWithCuRAND(
     CudaControl* perturbed_controls, const CudaControl* base_controls,
-    const CudaControl* random_controls) {
+    const float* random_numbers, int total_elements) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < NUM_SAMPLES * HORIZON) {
-    // Generate random perturbations
-    float vel_noise = random_controls[idx].velocity;
-    float steering_noise = random_controls[idx].steering_angle;
-
+  if (idx < total_elements) {
+    // Each control has 2 random numbers: velocity and steering
+    float vel_noise = random_numbers[idx * 2] * MAX_VELOCITY * 0.5f;     // Scale noise
+    float steering_noise = random_numbers[idx * 2 + 1] * MAX_STEERING * 0.5f;
+    
     // Add perturbations to base control
     CudaControl perturbed = base_controls[idx];
     perturbed.velocity += vel_noise;
     perturbed.steering_angle += steering_noise;
-
+    
     // Clamp to limits
-    perturbed.velocity =
-        fminf(fmaxf(perturbed.velocity, -MAX_VELOCITY), MAX_VELOCITY);
-    perturbed.steering_angle =
-        fminf(fmaxf(perturbed.steering_angle, -MAX_STEERING), MAX_STEERING);
-
+    perturbed.velocity = fminf(fmaxf(perturbed.velocity, -MAX_VELOCITY), MAX_VELOCITY);
+    perturbed.steering_angle = fminf(fmaxf(perturbed.steering_angle, -MAX_STEERING), MAX_STEERING);
+    
     perturbed_controls[idx] = perturbed;
   }
 }

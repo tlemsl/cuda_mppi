@@ -23,6 +23,10 @@ __global__ void kernel_GeneratePerturbedControls(
     CudaControl* perturbed_controls, const CudaControl* base_controls,
     const CudaControl* random_controls);
 
+__global__ void kernel_GeneratePerturbedControlsWithCuRAND(
+    CudaControl* perturbed_controls, const CudaControl* base_controls,
+    const float* random_numbers, int total_elements);
+
 __global__ void kernel_GenerateTrajectoriesWithCost(
     CudaTrajectory* trajectories, float* trajectory_costs,
     const CudaState* current_state, const CudaControl* control_sequences,

@@ -13,6 +13,7 @@
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
+#include <curand.h>
 #include <thrust/copy.h>
 #include <thrust/generate.h>
 #include <thrust/host_vector.h>
@@ -49,28 +50,22 @@ class MPPIController {
   CudaTrajectory* trajectories_d_;
   float* trajectory_costs_d_;
   CudaControl* optimal_control_sequence_d_;
-
-  
-  dim3 block_size_;
-  dim3 thread_size_;
-  thrust::default_random_engine generator_;
-  thrust::normal_distribution<float> noise_dist_;
-  thrust::host_vector<CudaControl> random_controls_;
   CudaControl* random_controls_d_;
   
-  // Additional random number generation for TBB
-  std::mt19937 std_generator_;
-  std::normal_distribution<float> std_noise_dist_;
+  // CUDA implementation
+  dim3 block_size_;
+  dim3 thread_size_;
+
+  curandGenerator_t generator_;
+  float* random_numbers_d_;
   
   // CUDA events for timing
   cudaEvent_t start_event_;
   cudaEvent_t end_event_;
 #else
-  // Random number generation
-  std::mt19937 generator_;  ///< Random number generator
-  std::normal_distribution<float>
-      noise_dist_;  ///< Noise distribution for perturbations
-
+  // Random number generation for CPU version
+  std::mt19937 generator_;
+  std::normal_distribution<float> noise_dist_;
 #endif
  public:
   MPPIController();

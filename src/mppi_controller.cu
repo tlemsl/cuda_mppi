@@ -8,8 +8,14 @@
 #include "cuda_mppi_controller/mppi_controller.h"
 #include "cuda_mppi_controller/mppi_functions.cuh"
 
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#include <curand.h>
+#include <thrust/copy.h>
+#include <thrust/generate.h>
+#include <thrust/host_vector.h>
 #include <thrust/random.h>
+#endif
 
 namespace mppi_controller {
 MPPIController::MPPIController() {
@@ -33,19 +39,10 @@ MPPIController::MPPIController() {
   cudaMalloc(&trajectories_d_, sizeof(CudaTrajectory) * NUM_SAMPLES);
   cudaMalloc(&trajectory_costs_d_, sizeof(float) * NUM_SAMPLES);
   cudaMalloc(&optimal_control_sequence_d_, sizeof(CudaControl) * HORIZON);
-  cudaMalloc(&random_controls_d_, sizeof(CudaControl) * NUM_SAMPLES * HORIZON);
 
   // Create CUDA events for timing
   cudaEventCreate(&start_event_);
   cudaEventCreate(&end_event_);
-
-  // Initialize random number generator
-  generator_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
-  noise_dist_ = thrust::normal_distribution<float>(0.0f, 1.0f);
-  
-  // Initialize std random number generator for TBB
-  std_generator_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
-  std_noise_dist_ = std::normal_distribution<float>(0.0f, 0.5f);
 
   std::cout << "CUDA MPPI Controller (Ackermann) initialized with "
             << NUM_SAMPLES << " samples, horizon " << HORIZON << ", wheelbase "
@@ -61,7 +58,6 @@ MPPIController::~MPPIController() {
   cudaFree(trajectories_d_);
   cudaFree(trajectory_costs_d_);
   cudaFree(optimal_control_sequence_d_);
-  cudaFree(random_controls_d_);
   
   // Destroy CUDA events
   cudaEventDestroy(start_event_);
@@ -84,150 +80,66 @@ void MPPIController::SetTargetState(const State& target) {
              cudaMemcpyHostToDevice);
 }
 
-// // Generate perturbed control sequences
-// void MPPIController::GeneratePerturbedControls() {
-//   // auto start_time = std::chrono::high_resolution_clock::now();
+void MPPIController::GeneratePerturbedControls() {
+  // Generate random numbers using cuRAND
+  curandGenerator_t generator;
   
-//   // Generate perturbed control sequences
-//   int total_thread = NUM_SAMPLES * HORIZON;
-//   thread_size_ = dim3(HORIZON * 2, 1);
-//   int total_block = (total_thread + thread_size_.x - 1) / thread_size_.x;
-//   block_size_ = dim3(total_block, 1);
-
-//   // auto random_gen_start = std::chrono::high_resolution_clock::now();
-//   thrust::generate(random_controls_.begin(), random_controls_.end(),
-//                    [this]() { 
-//                      CudaControl control;
-//                      control.velocity = noise_dist_(generator_) * MAX_VELOCITY;
-//                      control.steering_angle = noise_dist_(generator_) * MAX_STEERING;
-//                      return control;
-//                    });
-//   // auto random_gen_end = std::chrono::high_resolution_clock::now();
-//   // auto random_gen_duration = std::chrono::duration_cast<std::chrono::microseconds>(random_gen_end - random_gen_start);
-//   // std::cout << "[CUDA] Random generation time: " << random_gen_duration.count() << " microseconds" << std::endl;
-
-//   // Convert optimal_control_sequence_ to flat array for device transfer
-//   // auto memory_prep_start = std::chrono::high_resolution_clock::now();
-//   std::vector<CudaControl> flat_optimal_controls(NUM_SAMPLES * HORIZON);
-//   for (int i = 0; i < NUM_SAMPLES; ++i) {
-//     for (int t = 0; t < HORIZON; ++t) {
-//       flat_optimal_controls[i * HORIZON + t] = ToCudaControl(optimal_control_sequence_[t]);
-//     }
-//   }
-
-//   cudaMemcpyAsync(optimal_control_sequence_d_, flat_optimal_controls.data(),
-//              sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
-//              cudaMemcpyHostToDevice);
-
-//   cudaMemcpyAsync(random_controls_d_, random_controls_.data(),
-//              sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
-//              cudaMemcpyHostToDevice);
-//   // auto memory_prep_end = std::chrono::high_resolution_clock::now();
-//   // auto memory_prep_duration = std::chrono::duration_cast<std::chrono::microseconds>(memory_prep_end - memory_prep_start);
-//   // std::cout << "[CUDA] Memory preparation time: " << memory_prep_duration.count() << " microseconds" << std::endl;
-
-//   // Time CUDA kernel execution
-//   cudaEventRecord(start_event_);
-//   kernel_GeneratePerturbedControls<<<block_size_, thread_size_>>>(
-//       control_sequences_d_, optimal_control_sequence_d_, random_controls_d_);
-//   cudaDeviceSynchronize();
-//   cudaEventRecord(end_event_);
+  // Create cuRAND generator
+  curandCreateGenerator(&generator, CURAND_RNG_PSEUDO_DEFAULT);
   
-//   float kernel_time;
-//   cudaEventElapsedTime(&kernel_time, start_event_, end_event_);
-//   std::cout << "[CUDA] GeneratePerturbedControls kernel time: " << kernel_time * 1000 << " microseconds" << std::endl;
+  // Set seed based on current time
+  curandSetPseudoRandomGeneratorSeed(generator, 
+    std::chrono::steady_clock::now().time_since_epoch().count());
   
-//   // Copy back and convert to host format
-//   // auto memory_copy_start = std::chrono::high_resolution_clock::now();
-//   std::vector<CudaControl> flat_control_sequences(NUM_SAMPLES * HORIZON);
-//   cudaMemcpyAsync(flat_control_sequences.data(), control_sequences_d_,
-//              sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
-//              cudaMemcpyDeviceToHost);
-             
-//   // Convert flat array back to vector of vectors
-//   for (int i = 0; i < NUM_SAMPLES; ++i) {
-//     for (int t = 0; t < HORIZON; ++t) {
-//       control_sequences_[i][t] = ToHostControl(flat_control_sequences[i * HORIZON + t]);
-//     }
-//   }
-//   // auto memory_copy_end = std::chrono::high_resolution_clock::now();
-//   // auto memory_copy_duration = std::chrono::duration_cast<std::chrono::microseconds>(memory_copy_end - memory_copy_start);
-//   // std::cout << "[CUDA] Memory copy back time: " << memory_copy_duration.count() << " microseconds" << std::endl;
+  // Generate random numbers for velocity and steering perturbations
+  int total_elements = NUM_SAMPLES * HORIZON * 2; // 2 for velocity and steering
+  float* random_numbers_d;
+  cudaMalloc(&random_numbers_d, total_elements * sizeof(float));
   
-//   // auto host_end_time = std::chrono::high_resolution_clock::now();
-//   // auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(host_end_time - host_start_time);
-//   // std::cout << "[CUDA] GeneratePerturbedControls TOTAL time: " << total_duration.count() << " microseconds" << std::endl;
-// }
-void MPPIController::GeneratePerturbedControls() {  
-  // Create a functor class for TBB parallel execution
-  class PerturbedControlsFunctor {
-   private:
-    std::vector<std::vector<Control>>& control_sequences_;
-    const std::vector<Control>& optimal_control_sequence_;
-    std::mt19937& generator_;
-    std::normal_distribution<float>& noise_dist_;
-    
-   public:
-    PerturbedControlsFunctor(
-        std::vector<std::vector<Control>>& control_sequences,
-        const std::vector<Control>& optimal_control_sequence,
-        std::mt19937& generator,
-        std::normal_distribution<float>& noise_dist)
-        : control_sequences_(control_sequences),
-          optimal_control_sequence_(optimal_control_sequence),
-          generator_(generator),
-          noise_dist_(noise_dist) {}
-
-    void operator()(const tbb::blocked_range<int>& range) const {
-      // Each thread gets its own random number generator to avoid contention
-      std::mt19937 local_generator = generator_;
-      std::normal_distribution<float> local_noise_dist = noise_dist_;
-      
-      // Seed the local generator with a different seed for each thread
-      local_generator.seed(std::chrono::steady_clock::now().time_since_epoch().count() + 
-                          std::hash<std::thread::id>{}(std::this_thread::get_id()));
-      
-      for (int i = range.begin(); i != range.end(); ++i) {
-        control_sequences_[i].resize(HORIZON);
-
-        for (int t = 0; t < HORIZON; ++t) {
-          Control perturbed_control;
-
-          // Generate random perturbations using local generator
-          float vel_noise = local_noise_dist(local_generator) * MAX_VELOCITY;
-          float steering_noise = local_noise_dist(local_generator) * MAX_STEERING;
-
-          // If we have a previous optimal sequence, add perturbations to it
-          perturbed_control[0] = optimal_control_sequence_[t][0] + vel_noise;
-          perturbed_control[1] = optimal_control_sequence_[t][1] + steering_noise;
-          
-          // Apply control limits
-          perturbed_control[0] =
-              clamp<float>(perturbed_control[0], -MAX_VELOCITY, MAX_VELOCITY);
-          perturbed_control[1] =
-              clamp<float>(perturbed_control[1], -MAX_STEERING, MAX_STEERING);
-
-          control_sequences_[i][t] = perturbed_control;
-        }
-      }
-    }
-  };
+  // Generate normally distributed random numbers with mean=0, stddev=1
+  curandGenerateNormal(generator, random_numbers_d, total_elements, 0.0f, 1.0f);
   
-  // Execute parallel generation using TBB
-  tbb::parallel_for(tbb::blocked_range<int>(0, NUM_SAMPLES), PerturbedControlsFunctor(
-      control_sequences_, optimal_control_sequence_, std_generator_, std_noise_dist_));
-  
-  // Transfer control sequences to GPU
-  std::vector<CudaControl> flat_control_sequences(NUM_SAMPLES * HORIZON);
+  // Convert base control sequence to device memory
+  std::vector<CudaControl> base_controls_host(NUM_SAMPLES * HORIZON);
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     for (int t = 0; t < HORIZON; ++t) {
-      flat_control_sequences[i * HORIZON + t] = ToCudaControl(control_sequences_[i][t]);
+      base_controls_host[i * HORIZON + t] = ToCudaControl(optimal_control_sequence_[t]);
     }
   }
   
-  cudaMemcpy(control_sequences_d_, flat_control_sequences.data(),
-             sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
+  CudaControl* base_controls_d;
+  cudaMalloc(&base_controls_d, NUM_SAMPLES * HORIZON * sizeof(CudaControl));
+  cudaMemcpy(base_controls_d, base_controls_host.data(),
+             NUM_SAMPLES * HORIZON * sizeof(CudaControl),
              cudaMemcpyHostToDevice);
+  
+  // Launch CUDA kernel to generate perturbed controls
+  int threads_per_block = 256;
+  int blocks = (NUM_SAMPLES * HORIZON + threads_per_block - 1) / threads_per_block;
+  
+  kernel_GeneratePerturbedControlsWithCuRAND<<<blocks, threads_per_block>>>(
+      control_sequences_d_, base_controls_d, random_numbers_d, NUM_SAMPLES * HORIZON);
+  
+  cudaDeviceSynchronize();
+  
+  // Copy back to host for compatibility with existing code
+  std::vector<CudaControl> flat_control_sequences(NUM_SAMPLES * HORIZON);
+  cudaMemcpy(flat_control_sequences.data(), control_sequences_d_,
+             sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
+             cudaMemcpyDeviceToHost);
+  
+  // Update host control sequences
+  for (int i = 0; i < NUM_SAMPLES; ++i) {
+    control_sequences_[i].resize(HORIZON);
+    for (int t = 0; t < HORIZON; ++t) {
+      control_sequences_[i][t] = ToHostControl(flat_control_sequences[i * HORIZON + t]);
+    }
+  }
+  
+  // Cleanup
+  cudaFree(random_numbers_d);
+  cudaFree(base_controls_d);
+  curandDestroyGenerator(generator);
 }
 
 void MPPIController::GenerateTrajectoriesWithCost() {
@@ -235,7 +147,7 @@ void MPPIController::GenerateTrajectoriesWithCost() {
   
   // Optimize kernel launch configuration
   int total_threads = NUM_SAMPLES;
-  int threads_per_block = 256;  // Better utilization than 32
+  int threads_per_block = KERNEL_SIZE;
   int blocks = (total_threads + threads_per_block - 1) / threads_per_block;
   
   thread_size_ = dim3(threads_per_block, 1);
