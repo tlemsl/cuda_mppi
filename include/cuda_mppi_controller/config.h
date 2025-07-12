@@ -34,7 +34,7 @@ using Trajectory = std::vector<State>;
 #define MAX_VELOCITY 3.5f
 #define MAX_STEERING 0.52f
 
-#define KERNEL_SIZE 256
+#define KERNEL_SIZE 512
 
 // Helper function for clamping values (C++17 std::clamp alternative)
 template <typename T>

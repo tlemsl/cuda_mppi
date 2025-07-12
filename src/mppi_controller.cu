@@ -32,17 +32,32 @@ MPPIController::MPPIController() {
   current_state_ = State::Zero();
   target_state_ = State::Zero();
 
+
+  // Pinned memory for consistantly updated states  
+  cudaMallocHost(&current_state_d_, sizeof(CudaState));
+  cudaMallocHost(&target_state_d_, sizeof(CudaState));
+  
   // Allocate device memory (use cudaMalloc, not cudaMallocHost)
-  cudaMalloc(&current_state_d_, sizeof(CudaState));
-  cudaMalloc(&target_state_d_, sizeof(CudaState));
   cudaMalloc(&control_sequences_d_, sizeof(CudaControl) * NUM_SAMPLES * HORIZON);
   cudaMalloc(&trajectories_d_, sizeof(CudaTrajectory) * NUM_SAMPLES);
   cudaMalloc(&trajectory_costs_d_, sizeof(float) * NUM_SAMPLES);
   cudaMalloc(&optimal_control_sequence_d_, sizeof(CudaControl) * HORIZON);
 
+  int total_elements = NUM_SAMPLES * HORIZON * 2; // 2 for velocity and steering
+
+  cudaMalloc(&random_numbers_d_, sizeof(float) * total_elements);
+
   // Create CUDA events for timing
   cudaEventCreate(&start_event_);
   cudaEventCreate(&end_event_);
+
+
+  // Create cuRAND generator
+  curandCreateGenerator(&generator_, CURAND_RNG_PSEUDO_DEFAULT);
+  
+  // Set seed based on current time
+  curandSetPseudoRandomGeneratorSeed(generator_, 
+    std::chrono::steady_clock::now().time_since_epoch().count());
 
   std::cout << "CUDA MPPI Controller (Ackermann) initialized with "
             << NUM_SAMPLES << " samples, horizon " << HORIZON << ", wheelbase "
@@ -68,7 +83,7 @@ void MPPIController::SetCurrentState(const State& state) {
   current_state_ = state;
 
   CudaState cuda_state = ToCudaState(state);
-  cudaMemcpy(current_state_d_, &cuda_state, sizeof(CudaState),
+  cudaMemcpyAsync(current_state_d_, &cuda_state, sizeof(CudaState),
              cudaMemcpyHostToDevice);
 }
 
@@ -76,30 +91,18 @@ void MPPIController::SetTargetState(const State& target) {
   target_state_ = target;
 
   CudaState cuda_target = ToCudaState(target);
-  cudaMemcpy(target_state_d_, &cuda_target, sizeof(CudaState),
+  cudaMemcpyAsync(target_state_d_, &cuda_target, sizeof(CudaState),
              cudaMemcpyHostToDevice);
 }
 
 void MPPIController::GeneratePerturbedControls() {
-  // Generate random numbers using cuRAND
-  curandGenerator_t generator;
   
-  // Create cuRAND generator
-  curandCreateGenerator(&generator, CURAND_RNG_PSEUDO_DEFAULT);
   
-  // Set seed based on current time
-  curandSetPseudoRandomGeneratorSeed(generator, 
-    std::chrono::steady_clock::now().time_since_epoch().count());
-  
-  // Generate random numbers for velocity and steering perturbations
   int total_elements = NUM_SAMPLES * HORIZON * 2; // 2 for velocity and steering
-  float* random_numbers_d;
-  cudaMalloc(&random_numbers_d, total_elements * sizeof(float));
   
   // Generate normally distributed random numbers with mean=0, stddev=1
-  curandGenerateNormal(generator, random_numbers_d, total_elements, 0.0f, 1.0f);
+  curandGenerateNormal(generator_, random_numbers_d_, total_elements, 0.0f, 1.0f);
   
-  // Convert base control sequence to device memory
   std::vector<CudaControl> base_controls_host(NUM_SAMPLES * HORIZON);
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     for (int t = 0; t < HORIZON; ++t) {
@@ -113,34 +116,31 @@ void MPPIController::GeneratePerturbedControls() {
              NUM_SAMPLES * HORIZON * sizeof(CudaControl),
              cudaMemcpyHostToDevice);
   
-  // Launch CUDA kernel to generate perturbed controls
-  int threads_per_block = 256;
+  int threads_per_block = KERNEL_SIZE;
   int blocks = (NUM_SAMPLES * HORIZON + threads_per_block - 1) / threads_per_block;
-  
+  if (blocks > 1024) {
+    std::cout << "Blocks: " << blocks << " is greater than 1024" << std::endl;
+  }
   kernel_GeneratePerturbedControlsWithCuRAND<<<blocks, threads_per_block>>>(
-      control_sequences_d_, base_controls_d, random_numbers_d, NUM_SAMPLES * HORIZON);
+      control_sequences_d_, base_controls_d, random_numbers_d_, NUM_SAMPLES * HORIZON);
   
   cudaDeviceSynchronize();
   
-  // Copy back to host for compatibility with existing code
   std::vector<CudaControl> flat_control_sequences(NUM_SAMPLES * HORIZON);
   cudaMemcpy(flat_control_sequences.data(), control_sequences_d_,
              sizeof(CudaControl) * NUM_SAMPLES * HORIZON,
              cudaMemcpyDeviceToHost);
   
-  // Update host control sequences
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     control_sequences_[i].resize(HORIZON);
     for (int t = 0; t < HORIZON; ++t) {
       control_sequences_[i][t] = ToHostControl(flat_control_sequences[i * HORIZON + t]);
     }
   }
-  
-  // Cleanup
-  cudaFree(random_numbers_d);
-  cudaFree(base_controls_d);
-  curandDestroyGenerator(generator);
 }
+
+
+//************************************BENCHMARKING ************************************* */
 
 void MPPIController::GenerateTrajectoriesWithCost() {
   auto host_start_time = std::chrono::high_resolution_clock::now();
