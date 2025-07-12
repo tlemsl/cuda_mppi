@@ -99,15 +99,17 @@ __global__ void kernel_GenerateTrajectoriesWithCost(
     const CudaControl* control_sequences, const CudaState* target_state) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-  __shared__ CudaTrajectory trajectory;
   if (idx < NUM_SAMPLES) {
+    // Each thread works on its own trajectory (no shared memory needed)
+    CudaTrajectory trajectory;
     trajectory.states[0] = *current_state;
     float total_cost = 0.0;
-    for (int t = 1; t < HORIZON - 1; ++t) {
+    
+    for (int t = 1; t < HORIZON; ++t) {
       trajectory.states[t] = ForwardDynamics(trajectory.states[t - 1], control_sequences[idx * HORIZON + t]);
       total_cost += ComputeStateCost(trajectory.states[t], control_sequences[idx * HORIZON + t], *target_state);
     }
-    total_cost += ComputeStateCost(trajectory.states[HORIZON - 1], control_sequences[idx * HORIZON + HORIZON - 1], *target_state);
+    
     trajectory_costs[idx] = total_cost;
     trajectories[idx] = trajectory;
   }

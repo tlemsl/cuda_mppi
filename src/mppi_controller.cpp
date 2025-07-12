@@ -69,6 +69,8 @@ void MPPIController::GeneratePerturbedControls() {
 // Generate trajectories by forward simulation
 void MPPIController::GenerateTrajectoriesWithCost() {
   auto start_time = std::chrono::high_resolution_clock::now();
+  std::cout << "NUM_SAMPLES: " << NUM_SAMPLES << std::endl;
+  std::cout << "HORIZON: " << HORIZON << std::endl;
   
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     trajectories_[i].clear();
@@ -77,7 +79,6 @@ void MPPIController::GenerateTrajectoriesWithCost() {
     State current = current_state_;
     float total_cost = 0.0;
 
-    // Forward simulate trajectory
     for (int t = 1; t < HORIZON; ++t) {
       // Compute cost
       total_cost += ComputeStateCost(current, control_sequences_[i][t], target_state_);
@@ -94,7 +95,6 @@ void MPPIController::GenerateTrajectoriesWithCost() {
   std::cout << "[CPU] GenerateTrajectoriesWithCost execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
-// Compute optimal control using importance-weighted averaging
 Control MPPIController::ComputeOptimalControl() {
   auto start_time = std::chrono::high_resolution_clock::now();
   

@@ -16,8 +16,8 @@ using Trajectory = std::vector<State>;
 
 
 // Controller parameters
-#define HORIZON 128
-#define NUM_SAMPLES 2048
+#define HORIZON 20
+#define NUM_SAMPLES 8192
 #define DT 0.05f
 #define LAMBDA 10.0f
 
@@ -33,6 +33,8 @@ using Trajectory = std::vector<State>;
 #define WHEELBASE 0.3f
 #define MAX_VELOCITY 3.5f
 #define MAX_STEERING 0.52f
+
+#define KERNEL_SIZE 32
 
 // Helper function for clamping values (C++17 std::clamp alternative)
 template <typename T>

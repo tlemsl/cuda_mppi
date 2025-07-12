@@ -84,6 +84,12 @@ class MPPIController {
 
   void PrintStatus() const;
 
+  // Benchmarking methods
+  void BenchmarkGeneratePerturbedControls(int iterations = 100);
+  void BenchmarkGenerateTrajectoriesWithCost(int iterations = 100);
+  void BenchmarkComputeOptimalControl(int iterations = 100);
+  void RunFullBenchmark(int iterations = 100);
+
  private:
   void GeneratePerturbedControls();
 
