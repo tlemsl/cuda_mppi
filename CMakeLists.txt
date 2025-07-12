@@ -61,10 +61,20 @@ set_property(TARGET cuda_mppi_controller_lib PROPERTY CUDA_STANDARD_REQUIRED ON)
 add_executable(c_mppi_controller src/node.cpp)
 add_executable(cuda_mppi_controller src/node.cpp)
 
+# Create benchmark executables
+add_executable(c_mppi_benchmark src/benchmark_cpu.cpp)
+add_executable(cuda_mppi_benchmark src/benchmark_cuda.cu)
+
 # Link libraries
 target_link_libraries(c_mppi_controller ${catkin_LIBRARIES} c_mppi_controller_lib Eigen3::Eigen TBB::tbb)
 target_link_libraries(cuda_mppi_controller ${catkin_LIBRARIES} cuda_mppi_controller_lib Eigen3::Eigen TBB::tbb)
 target_link_libraries(cuda_mppi_controller ${CUDA_LIBRARIES} ${CUDA_CURAND_LIBRARY})
+
+# Link benchmark executables
+target_link_libraries(c_mppi_benchmark c_mppi_controller_lib Eigen3::Eigen TBB::tbb)
+target_link_libraries(cuda_mppi_benchmark cuda_mppi_controller_lib Eigen3::Eigen TBB::tbb)
+target_link_libraries(cuda_mppi_benchmark ${CUDA_LIBRARIES} ${CUDA_CURAND_LIBRARY})
+target_compile_definitions(cuda_mppi_benchmark PRIVATE USE_CUDA)
 
 # Print build information
 message(STATUS "CMAKE_CXX_COMPILER_ID: ${CMAKE_CXX_COMPILER_ID}")

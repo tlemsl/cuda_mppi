@@ -68,9 +68,6 @@ void MPPIController::GeneratePerturbedControls() {
 
 // Generate trajectories by forward simulation
 void MPPIController::GenerateTrajectoriesWithCost() {
-  auto start_time = std::chrono::high_resolution_clock::now();
-  std::cout << "NUM_SAMPLES: " << NUM_SAMPLES << std::endl;
-  std::cout << "HORIZON: " << HORIZON << std::endl;
   
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     trajectories_[i].clear();
@@ -89,10 +86,6 @@ void MPPIController::GenerateTrajectoriesWithCost() {
 
     trajectory_costs_[i] = total_cost;
   }
-  
-  auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-  std::cout << "[CPU] GenerateTrajectoriesWithCost execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
 Control MPPIController::ComputeOptimalControl() {
@@ -165,15 +158,7 @@ Control MPPIController::ComputeOptimalControl() {
   auto optimization_end = std::chrono::high_resolution_clock::now();
   auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(optimization_end - optimization_start);
 
-  auto total_end_time = std::chrono::high_resolution_clock::now();
-  auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(total_end_time - start_time);
-  std::cout << "--------------------------------" << std::endl;
-  std::cout << "[CPU] Warm start time: " << warmstart_duration.count() << " microseconds" << std::endl;
-  std::cout << "[CPU] Perturbed controls generation time: " << perturbed_duration.count() << " microseconds" << std::endl;
-  std::cout << "[CPU] Trajectories generation time: " << trajectories_duration.count() << " microseconds" << std::endl;
-  std::cout << "[CPU] Optimization time: " << optimization_duration.count() << " microseconds" << std::endl;
-  std::cout << "[CPU] TOTAL ComputeOptimalControl execution time: " << total_duration.count() << " microseconds" << std::endl;
-  std::cout << "--------------------------------" << std::endl;
+
   // Return first control action
   return optimal_control_sequence_[0];
 }
@@ -202,5 +187,145 @@ void MPPIController::PrintStatus() const {
         *std::min_element(trajectory_costs_.begin(), trajectory_costs_.end());
     std::cout << "Minimum trajectory cost: " << min_cost << std::endl;
   }
+}
+
+// Benchmarking methods
+void MPPIController::BenchmarkGeneratePerturbedControls(int iterations) {
+  std::cout << "\n=== Benchmarking GeneratePerturbedControls (CPU) ===" << std::endl;
+  std::cout << "Running " << iterations << " iterations..." << std::endl;
+  
+  std::vector<double> times;
+  times.reserve(iterations);
+  
+  // Warm up
+  for (int i = 0; i < 5; ++i) {
+    GeneratePerturbedControls();
+  }
+  
+  // Benchmark
+  for (int i = 0; i < iterations; ++i) {
+    auto start = std::chrono::high_resolution_clock::now();
+    GeneratePerturbedControls();
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    times.push_back(duration.count());
+  }
+  
+  // Calculate statistics
+  double sum = 0.0;
+  for (double time : times) {
+    sum += time;
+  }
+  double avg = sum / iterations;
+  
+  std::sort(times.begin(), times.end());
+  double median = times[iterations / 2];
+  double min_time = times[0];
+  double max_time = times[iterations - 1];
+  
+  std::cout << "Average time: " << avg << " microseconds" << std::endl;
+  std::cout << "Median time: " << median << " microseconds" << std::endl;
+  std::cout << "Min time: " << min_time << " microseconds" << std::endl;
+  std::cout << "Max time: " << max_time << " microseconds" << std::endl;
+}
+
+void MPPIController::BenchmarkGenerateTrajectoriesWithCost(int iterations) {
+  std::cout << "\n=== Benchmarking GenerateTrajectoriesWithCost (CPU) ===" << std::endl;
+  std::cout << "Running " << iterations << " iterations..." << std::endl;
+  
+  std::vector<double> times;
+  times.reserve(iterations);
+  
+  // Ensure we have control sequences
+  GeneratePerturbedControls();
+  
+  // Warm up
+  for (int i = 0; i < 5; ++i) {
+    GenerateTrajectoriesWithCost();
+  }
+  
+  // Benchmark
+  for (int i = 0; i < iterations; ++i) {
+    auto start = std::chrono::high_resolution_clock::now();
+    GenerateTrajectoriesWithCost();
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    times.push_back(duration.count());
+  }
+  
+  // Calculate statistics
+  double sum = 0.0;
+  for (double time : times) {
+    sum += time;
+  }
+  double avg = sum / iterations;
+  
+  std::sort(times.begin(), times.end());
+  double median = times[iterations / 2];
+  double min_time = times[0];
+  double max_time = times[iterations - 1];
+  
+  std::cout << "Average time: " << avg << " microseconds" << std::endl;
+  std::cout << "Median time: " << median << " microseconds" << std::endl;
+  std::cout << "Min time: " << min_time << " microseconds" << std::endl;
+  std::cout << "Max time: " << max_time << " microseconds" << std::endl;
+}
+
+void MPPIController::BenchmarkComputeOptimalControl(int iterations) {
+  std::cout << "\n=== Benchmarking ComputeOptimalControl (CPU) ===" << std::endl;
+  std::cout << "Running " << iterations << " iterations..." << std::endl;
+  
+  std::vector<double> times;
+  times.reserve(iterations);
+  
+  // Warm up
+  for (int i = 0; i < 5; ++i) {
+    ComputeOptimalControl();
+  }
+  
+  // Benchmark
+  for (int i = 0; i < iterations; ++i) {
+    auto start = std::chrono::high_resolution_clock::now();
+    ComputeOptimalControl();
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    times.push_back(duration.count());
+  }
+  
+  // Calculate statistics
+  double sum = 0.0;
+  for (double time : times) {
+    sum += time;
+  }
+  double avg = sum / iterations;
+  
+  std::sort(times.begin(), times.end());
+  double median = times[iterations / 2];
+  double min_time = times[0];
+  double max_time = times[iterations - 1];
+  
+  std::cout << "Average time: " << avg << " microseconds" << std::endl;
+  std::cout << "Median time: " << median << " microseconds" << std::endl;
+  std::cout << "Min time: " << min_time << " microseconds" << std::endl;
+  std::cout << "Max time: " << max_time << " microseconds" << std::endl;
+}
+
+void MPPIController::RunFullBenchmark(int iterations) {
+  std::cout << "\n======================================" << std::endl;
+  std::cout << "CPU MPPI Controller Benchmark" << std::endl;
+  std::cout << "NUM_SAMPLES: " << NUM_SAMPLES << std::endl;
+  std::cout << "HORIZON: " << HORIZON << std::endl;
+  std::cout << "======================================" << std::endl;
+  
+  BenchmarkGeneratePerturbedControls(iterations);
+  BenchmarkGenerateTrajectoriesWithCost(iterations);
+  BenchmarkComputeOptimalControl(iterations);
+  
+  std::cout << "\n======================================" << std::endl;
+  std::cout << "Benchmark Complete" << std::endl;
+  std::cout << "======================================" << std::endl;
 }
 };  // namespace mppi_controller

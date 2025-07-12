@@ -58,6 +58,10 @@ class MPPIController {
   thrust::host_vector<CudaControl> random_controls_;
   CudaControl* random_controls_d_;
   
+  // Additional random number generation for TBB
+  std::mt19937 std_generator_;
+  std::normal_distribution<float> std_noise_dist_;
+  
   // CUDA events for timing
   cudaEvent_t start_event_;
   cudaEvent_t end_event_;
