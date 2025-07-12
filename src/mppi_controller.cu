@@ -46,6 +46,11 @@ MPPIController::MPPIController() {
   int total_elements = NUM_SAMPLES * HORIZON * 2; // 2 for velocity and steering
 
   cudaMalloc(&random_numbers_d_, sizeof(float) * total_elements);
+  
+  cudaMalloc(&min_cost_d_, sizeof(float));
+  cudaMalloc(&weights_d_, sizeof(float) * NUM_SAMPLES);
+  cudaMalloc(&weighted_controls_d_, sizeof(CudaControl) * HORIZON);
+  cudaMalloc(&total_weights_d_, sizeof(float));
 
   // Create CUDA events for timing
   cudaEventCreate(&start_event_);
@@ -73,6 +78,16 @@ MPPIController::~MPPIController() {
   cudaFree(trajectories_d_);
   cudaFree(trajectory_costs_d_);
   cudaFree(optimal_control_sequence_d_);
+  cudaFree(random_numbers_d_);
+  
+  // Free additional device memory for optimization
+  cudaFree(min_cost_d_);
+  cudaFree(weights_d_);
+  cudaFree(weighted_controls_d_);
+  cudaFree(total_weights_d_);
+  
+  // Destroy cuRAND generator
+  curandDestroyGenerator(generator_);
   
   // Destroy CUDA events
   cudaEventDestroy(start_event_);
@@ -140,7 +155,6 @@ void MPPIController::GeneratePerturbedControls() {
 }
 
 
-//************************************BENCHMARKING ************************************* */
 
 void MPPIController::GenerateTrajectoriesWithCost() {
   auto host_start_time = std::chrono::high_resolution_clock::now();
@@ -203,31 +217,56 @@ Control MPPIController::ComputeOptimalControl() {
   auto trajectories_end = std::chrono::high_resolution_clock::now();
   auto trajectories_duration = std::chrono::duration_cast<std::chrono::microseconds>(trajectories_end - trajectories_start);
 
-  // Find minimum cost for normalization
   auto optimization_start = std::chrono::high_resolution_clock::now();
-  float min_cost = *std::min_element(trajectory_costs_.begin(), trajectory_costs_.end());
-
-  // Compute importance-weighted control
-  std::vector<Control> weighted_controls(HORIZON, Control::Zero());
-  float total_weights = 0.0;
-
-  for (int i = 0; i < NUM_SAMPLES; ++i) {
-    float weight = std::exp(-(trajectory_costs_[i] - min_cost) / LAMBDA);
-    for (int t = 0; t < HORIZON; ++t) {
-      weighted_controls[t] += control_sequences_[i][t] * weight;
-    }
-    total_weights += weight;
+  
+  int threads_per_block = KERNEL_SIZE;
+  int blocks_for_reduction = (NUM_SAMPLES + threads_per_block - 1) / threads_per_block;
+  
+  // Allocate temporary memory for multi-block reduction
+  float* temp_min_costs_d;
+  cudaMalloc(&temp_min_costs_d, sizeof(float) * blocks_for_reduction);  
+  kernel_FindMinCost<<<blocks_for_reduction, threads_per_block, 
+                      threads_per_block * sizeof(float)>>>(
+      trajectory_costs_d_, temp_min_costs_d, NUM_SAMPLES);
+  
+  if (blocks_for_reduction > 1) {
+    kernel_FindMinCost<<<1, blocks_for_reduction, 
+                        blocks_for_reduction * sizeof(float)>>>(
+        temp_min_costs_d, min_cost_d_, blocks_for_reduction);
+  } else {
+    cudaMemcpy(min_cost_d_, temp_min_costs_d, sizeof(float), cudaMemcpyDeviceToDevice);
+  }
+  cudaDeviceSynchronize();
+  int blocks_for_weights = (NUM_SAMPLES + threads_per_block - 1) / threads_per_block;
+  kernel_ComputeWeights<<<blocks_for_weights, threads_per_block>>>(
+      trajectory_costs_d_, weights_d_, min_cost_d_, NUM_SAMPLES);
+  cudaDeviceSynchronize();
+  int shared_mem_size = 3 * threads_per_block * sizeof(float);
+  kernel_ComputeWeightedControls<<<HORIZON, threads_per_block, shared_mem_size>>>(
+      control_sequences_d_, weights_d_, weighted_controls_d_, total_weights_d_, 
+      NUM_SAMPLES, HORIZON);
+  cudaDeviceSynchronize();
+  int blocks_for_normalize = (HORIZON + threads_per_block - 1) / threads_per_block;
+  kernel_NormalizeControls<<<blocks_for_normalize, threads_per_block>>>(
+      optimal_control_sequence_d_, weighted_controls_d_, total_weights_d_, HORIZON);
+    
+  cudaDeviceSynchronize();
+  std::vector<CudaControl> cuda_optimal_controls(HORIZON);
+  cudaMemcpy(cuda_optimal_controls.data(), optimal_control_sequence_d_,
+             sizeof(CudaControl) * HORIZON, cudaMemcpyDeviceToHost);
+  
+  for (int t = 0; t < HORIZON; ++t) {
+    optimal_control_sequence_[t] = ToHostControl(cuda_optimal_controls[t]);
   }
   
-  // Normalize and update optimal control sequence
-  for (int t = 0; t < HORIZON; ++t) {
-    if (total_weights > 0) {
-      optimal_control_sequence_[t] = weighted_controls[t] / total_weights;
-    } else {
-      std::cout << "Abnormal total weights: " << total_weights << std::endl;
-      optimal_control_sequence_[t] = Control::Zero();
-    }
+  float total_weights_host;
+  cudaMemcpy(&total_weights_host, total_weights_d_, sizeof(float), cudaMemcpyDeviceToHost);
+  if (total_weights_host <= 0) {
+    std::cout << "Abnormal total weights: " << total_weights_host << std::endl;
   }
+  
+  // Free temporary memory
+  cudaFree(temp_min_costs_d);
   
   auto optimization_end = std::chrono::high_resolution_clock::now();
   auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(optimization_end - optimization_start);
@@ -258,6 +297,7 @@ void MPPIController::PrintStatus() const {
     std::cout << "Minimum trajectory cost: " << min_cost << std::endl;
   }
 }
+//************************************BENCHMARKING ************************************* */
 
 // Benchmarking methods
 void MPPIController::BenchmarkGeneratePerturbedControls(int iterations) {

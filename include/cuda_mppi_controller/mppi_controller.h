@@ -52,6 +52,12 @@ class MPPIController {
   CudaControl* optimal_control_sequence_d_;
   CudaControl* random_controls_d_;
   
+  // Additional device memory for optimization
+  float* min_cost_d_;           // For minimum cost reduction
+  float* weights_d_;            // For importance weights
+  CudaControl* weighted_controls_d_;  // For weighted control accumulation
+  float* total_weights_d_;      // For total weight reduction
+  
   // CUDA implementation
   dim3 block_size_;
   dim3 thread_size_;

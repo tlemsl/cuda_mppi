@@ -1,5 +1,6 @@
 #define USE_CUDA
 #include <cmath>
+#include <float.h>
 
 #include "cuda_mppi_controller/config.h"
 #include "cuda_mppi_controller/mppi_functions.cuh"
@@ -121,6 +122,108 @@ __global__ void kernel_GenerateTrajectoriesWithCost(
 
     trajectory_costs[idx] = cost_s[kernel_idx];
     trajectories[idx] = trajectory;
+  }
+}
+
+// Parallel reduction kernel to find minimum cost
+__global__ void kernel_FindMinCost(const float* trajectory_costs, float* min_cost, int num_samples) {
+  extern __shared__ float sdata[KERNEL_SIZE];
+  
+  int tid = threadIdx.x;
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  // Load data into shared memory
+  sdata[tid] = (i < num_samples) ? trajectory_costs[i] : FLT_MAX;
+  __syncthreads();
+  
+  // Reduction in shared memory
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (tid < s) {
+      sdata[tid] = fminf(sdata[tid], sdata[tid + s]);
+    }
+    __syncthreads();
+  }
+  
+  if (tid == 0) {
+    min_cost[blockIdx.x] = sdata[0];
+  }
+}
+
+__global__ void kernel_ComputeWeights(const float* trajectory_costs, float* weights, 
+                                      const float* min_cost, int num_samples) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  if (idx < num_samples) {
+    weights[idx] = expf(-(trajectory_costs[idx] - *min_cost) / LAMBDA);
+  }
+}
+
+__global__ void kernel_ComputeWeightedControls(const CudaControl* control_sequences,
+                                               const float* weights,
+                                               CudaControl* weighted_controls,
+                                               float* total_weights,
+                                               int num_samples, int horizon) {
+  extern __shared__ float sdata[KERNEL_SIZE];
+  
+  int tid = threadIdx.x;
+  int t = blockIdx.x;  // Time step
+  int i = threadIdx.x; // Sample index
+  
+  // Shared memory layout: [velocity_sum, steering_sum, weight_sum]
+  float* vel_sum = sdata;
+  float* steer_sum = sdata + blockDim.x;
+  float* weight_sum = sdata + 2 * blockDim.x;
+  
+  // Initialize shared memory
+  vel_sum[tid] = 0.0f;
+  steer_sum[tid] = 0.0f;
+  weight_sum[tid] = 0.0f;
+  
+  // Accumulate weighted controls for this time step
+  for (int sample = i; sample < num_samples; sample += blockDim.x) {
+    float weight = weights[sample];
+    CudaControl control = control_sequences[sample * horizon + t];
+    
+    vel_sum[tid] += control.velocity * weight;
+    steer_sum[tid] += control.steering_angle * weight;
+    weight_sum[tid] += weight;
+  }
+  
+  __syncthreads();
+  
+  // Parallel reduction
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (tid < s) {
+      vel_sum[tid] += vel_sum[tid + s];
+      steer_sum[tid] += steer_sum[tid + s];
+      weight_sum[tid] += weight_sum[tid + s];
+    }
+    __syncthreads();
+  }
+  
+  if (tid == 0) {
+    weighted_controls[t].velocity = vel_sum[0];
+    weighted_controls[t].steering_angle = steer_sum[0];
+    if (t == 0) {
+      *total_weights = weight_sum[0];
+    }
+  }
+}
+
+__global__ void kernel_NormalizeControls(CudaControl* optimal_control_sequence,
+                                         const CudaControl* weighted_controls,
+                                         const float* total_weights,
+                                         int horizon) {
+  int t = blockIdx.x * blockDim.x + threadIdx.x;
+  
+  if (t < horizon) {
+    if (*total_weights > 0.0f) {
+      optimal_control_sequence[t].velocity = weighted_controls[t].velocity / *total_weights;
+      optimal_control_sequence[t].steering_angle = weighted_controls[t].steering_angle / *total_weights;
+    } else {
+      optimal_control_sequence[t].velocity = 0.0f;
+      optimal_control_sequence[t].steering_angle = 0.0f;
+    }
   }
 }
 

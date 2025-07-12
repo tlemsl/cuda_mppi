@@ -36,6 +36,22 @@ __global__ void kernel_ComputeOptimalControl(
     CudaControl* optimal_control_sequence, const CudaTrajectory* trajectories,
     const float* trajectory_costs, const int num_samples, const int horizon);
 
+__global__ void kernel_FindMinCost(const float* trajectory_costs, float* min_cost, int num_samples);
+
+__global__ void kernel_ComputeWeights(const float* trajectory_costs, float* weights, 
+                                      const float* min_cost, int num_samples);
+
+__global__ void kernel_ComputeWeightedControls(const CudaControl* control_sequences,
+                                               const float* weights,
+                                               CudaControl* weighted_controls,
+                                               float* total_weights,
+                                               int num_samples, int horizon);
+
+__global__ void kernel_NormalizeControls(CudaControl* optimal_control_sequence,
+                                         const CudaControl* weighted_controls,
+                                         const float* total_weights,
+                                         int horizon);
+
 }  // namespace mppi_controller
 
 #endif  // MPPI_FUNCTIONS_H
