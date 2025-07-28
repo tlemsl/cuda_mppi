@@ -152,9 +152,13 @@ __global__ void kernel_FindMinCost(const float* trajectory_costs, float* min_cos
 __global__ void kernel_ComputeWeights(const float* trajectory_costs, float* weights, 
                                       const float* min_cost, int num_samples) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  
+  __shared__ float min_cost_s;
+  if (threadIdx.x == 0) {
+    min_cost_s = *min_cost;
+  }
+  __syncthreads();
   if (idx < num_samples) {
-    weights[idx] = expf(-(trajectory_costs[idx] - *min_cost) / LAMBDA);
+    weights[idx] = expf(-(trajectory_costs[idx] - min_cost_s) / LAMBDA);
   }
 }
 
@@ -215,11 +219,15 @@ __global__ void kernel_NormalizeControls(CudaControl* optimal_control_sequence,
                                          const float* total_weights,
                                          int horizon) {
   int t = blockIdx.x * blockDim.x + threadIdx.x;
-  
+  __shared__ float total_weights_s;
+  if (threadIdx.x == 0) {
+    total_weights_s = *total_weights;
+  }
+  __syncthreads();
   if (t < horizon) {
-    if (*total_weights > 0.0f) {
-      optimal_control_sequence[t].velocity = weighted_controls[t].velocity / *total_weights;
-      optimal_control_sequence[t].steering_angle = weighted_controls[t].steering_angle / *total_weights;
+    if (total_weights_s > 0.0f) {
+      optimal_control_sequence[t].velocity = weighted_controls[t].velocity / total_weights_s;
+      optimal_control_sequence[t].steering_angle = weighted_controls[t].steering_angle / total_weights_s;
     } else {
       optimal_control_sequence[t].velocity = 0.0f;
       optimal_control_sequence[t].steering_angle = 0.0f;
