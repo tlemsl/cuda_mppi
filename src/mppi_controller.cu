@@ -64,10 +64,18 @@ MPPIController::MPPIController() {
   curandSetPseudoRandomGeneratorSeed(generator_, 
     std::chrono::steady_clock::now().time_since_epoch().count());
 
+#ifdef ACKERMANN_MODEL
   std::cout << "CUDA MPPI Controller (Ackermann) initialized with "
             << NUM_SAMPLES << " samples, horizon " << HORIZON << ", wheelbase "
             << WHEELBASE << "m, max steering " << MAX_STEERING << " rad"
             << std::endl;
+#endif
+#ifdef QUADROTOR_MODEL
+  std::cout << "CUDA MPPI Controller (Quadrotor) initialized with "
+            << NUM_SAMPLES << " samples, horizon " << HORIZON << ", arm length "
+            << ARM_LENGTH << "m, max thrust " << MAX_THRUST << " N"
+            << std::endl;
+#endif
 }
 
 MPPIController::~MPPIController() {
@@ -112,8 +120,12 @@ void MPPIController::SetTargetState(const State& target) {
 
 void MPPIController::GeneratePerturbedControls() {
   
-  
+#ifdef ACKERMANN_MODEL
   int total_elements = NUM_SAMPLES * HORIZON * 2; // 2 for velocity and steering
+#endif
+#ifdef QUADROTOR_MODEL
+  int total_elements = NUM_SAMPLES * HORIZON * 4; // 4 for u1, u2, u3, u4
+#endif
   
   // Generate normally distributed random numbers with mean=0, stddev=1
   curandGenerateNormal(generator_, random_numbers_d_, total_elements, 0.0f, 1.0f);
@@ -155,10 +167,7 @@ void MPPIController::GeneratePerturbedControls() {
 }
 
 
-
 void MPPIController::GenerateTrajectoriesWithCost() {
-  auto host_start_time = std::chrono::high_resolution_clock::now();
-  
   // Optimize kernel launch configuration
   int total_threads = NUM_SAMPLES;
   int threads_per_block = KERNEL_SIZE;
@@ -167,19 +176,10 @@ void MPPIController::GenerateTrajectoriesWithCost() {
   thread_size_ = dim3(threads_per_block, 1);
   block_size_ = dim3(blocks, 1);
 
-  // Time CUDA kernel execution
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-  
-  cudaEventRecord(start);
+  // Launch kernel
   kernel_GenerateTrajectoriesWithCost<<<block_size_, thread_size_>>>(
       trajectories_d_, trajectory_costs_d_, current_state_d_, control_sequences_d_, target_state_d_);
-  cudaEventRecord(stop);
-  cudaEventSynchronize(stop);
-  
-  cudaEventDestroy(start);
-  cudaEventDestroy(stop);
+  cudaDeviceSynchronize();
   
   // Copy back trajectory costs
   cudaMemcpy(trajectory_costs_.data(), trajectory_costs_d_,

@@ -25,13 +25,9 @@ namespace mppi_controller {
 class MPPIController {
  private:
   // C++ implementation
-  // Cost matrices
-  Eigen::Matrix3f Q_;  ///< State cost matrix [x, y, theta]
-  Eigen::Matrix2f R_;  ///< Control cost matrix [velocity, steering]
-
   // Current state and target
-  State current_state_;  ///< Current robot state [x, y, theta]
-  State target_state_;   ///< Target robot state [x, y, theta]
+  State current_state_;  ///< Current robot state
+  State target_state_;   ///< Target robot state
 
   // Control sequences and trajectories
   std::vector<std::vector<Control>>

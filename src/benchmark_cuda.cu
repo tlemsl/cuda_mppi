@@ -29,11 +29,15 @@ int main(int argc, char** argv) {
         MPPIController controller;
         
         // Set some initial states for testing
-        State current_state;
+        State current_state, target_state;
+#ifdef ACKERMANN_MODEL
         current_state << 0.0f, 0.0f, 0.0f;  // x, y, theta
-        
-        State target_state;
         target_state << 5.0f, 5.0f, 0.0f;   // x, y, theta
+#endif
+#ifdef QUADROTOR_MODEL
+        current_state << 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f;  // x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz
+        target_state << 5.0f, 5.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f;   // x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz
+#endif
         
         controller.SetCurrentState(current_state);
         controller.SetTargetState(target_state);

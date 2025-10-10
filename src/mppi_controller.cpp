@@ -22,10 +22,18 @@ MPPIController::MPPIController() {
   // Initialize random number generator
   generator_.seed(std::chrono::steady_clock::now().time_since_epoch().count());
   noise_dist_ = std::normal_distribution<float>(0.0, 0.5);
+#ifdef ACKERMANN_MODEL
   std::cout << "CPP MPPI Controller (Ackermann) initialized with "
             << NUM_SAMPLES << " samples, horizon " << HORIZON << ", wheelbase "
             << WHEELBASE << "m, max steering " << MAX_STEERING << " rad"
             << std::endl;
+#endif
+#ifdef QUADROTOR_MODEL
+  std::cout << "CPP MPPI Controller (Quadrotor) initialized with "
+            << NUM_SAMPLES << " samples, horizon " << HORIZON << ", arm length "
+            << ARM_LENGTH << "m, max thrust " << MAX_THRUST << " N"
+            << std::endl;
+#endif
 }
 
 MPPIController::~MPPIController() {
@@ -42,6 +50,7 @@ void MPPIController::SetTargetState(const State& target) {
 
 // Generate perturbed control sequences
 void MPPIController::GeneratePerturbedControls() {  
+#ifdef ACKERMANN_MODEL
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     control_sequences_[i].resize(HORIZON);
 
@@ -64,11 +73,42 @@ void MPPIController::GeneratePerturbedControls() {
       control_sequences_[i][t] = perturbed_control;
     }
   }
+#endif
+#ifdef QUADROTOR_MODEL
+  for (int i = 0; i < NUM_SAMPLES; ++i) {
+    control_sequences_[i].resize(HORIZON);
+
+    for (int t = 0; t < HORIZON; ++t) {
+      Control perturbed_control;
+
+      // Generate random perturbations
+      float u1_noise = noise_dist_(generator_) * MAX_THRUST;
+      float u2_noise = noise_dist_(generator_) * MAX_THRUST;
+      float u3_noise = noise_dist_(generator_) * MAX_THRUST;
+      float u4_noise = noise_dist_(generator_) * MAX_THRUST;
+
+      perturbed_control[0] = optimal_control_sequence_[t][0] + u1_noise;
+      perturbed_control[1] = optimal_control_sequence_[t][1] + u2_noise;
+      perturbed_control[2] = optimal_control_sequence_[t][2] + u3_noise;
+      perturbed_control[3] = optimal_control_sequence_[t][3] + u4_noise;
+
+      perturbed_control[0] =
+          clamp<float>(perturbed_control[0], -MAX_THRUST, MAX_THRUST);
+      perturbed_control[1] =
+          clamp<float>(perturbed_control[1], -MAX_THRUST, MAX_THRUST);
+      perturbed_control[2] =
+          clamp<float>(perturbed_control[2], -MAX_THRUST, MAX_THRUST);
+      perturbed_control[3] =
+          clamp<float>(perturbed_control[3], -MAX_THRUST, MAX_THRUST);
+
+      control_sequences_[i][t] = perturbed_control;
+    }
+  }
+#endif
 }
 
 // Generate trajectories by forward simulation
 void MPPIController::GenerateTrajectoriesWithCost() {
-  
   for (int i = 0; i < NUM_SAMPLES; ++i) {
     trajectories_[i].clear();
     trajectories_[i].push_back(current_state_);
