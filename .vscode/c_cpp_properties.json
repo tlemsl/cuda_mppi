@@ -3,7 +3,7 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}/core/include",
                 "/usr/include/eigen3"
             ],
             "defines": [],
